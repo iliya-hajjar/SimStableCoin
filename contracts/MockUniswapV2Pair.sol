@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
+import "./IUniswapV2Pair.sol";
 
-contract MockUniswapV2Pair {
+contract MockUniswapV2Pair is IUniswapV2Pair {
     uint112 private _reserve0;
     uint112 private _reserve1;
     address private _token0;

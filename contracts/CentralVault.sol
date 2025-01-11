@@ -4,20 +4,7 @@ pragma solidity ^0.8.19;
 import "./SimStable.sol";
 import "./SimGov.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-
-interface IUniswapV2Pair {
-    function getReserves()
-    external
-    view
-    returns (
-        uint112 reserve0,
-        uint112 reserve1,
-        uint32 blockTimestampLast
-    );
-    function token0() external view returns (address);
-    function token1() external view returns (address);
-}
+import "./IUniswapV2Pair.sol";
 
 
 contract CentralVault {
@@ -134,8 +121,9 @@ contract CentralVault {
         require(stableAmount > 0, "Invalid stable amount");
 
         // Update prices before calculations
-        uint256 simStablePrice = getTokenPrice(simStablePair, address(simStable));
-        uint256 simGovPrice = getTokenPrice(simGovPair, address(simGov));
+        uint256 simStablePrice = getTokenPrice(address(simStablePair), address(simStable));
+        uint256 simGovPrice = getTokenPrice(address(simGovPair), address(simGov));
+
 
         // Calculate the total value of SimStable being redeemed (based on price)
         uint256 stableValueInCollateral = (stableAmount * simStablePrice) / 1e18;
