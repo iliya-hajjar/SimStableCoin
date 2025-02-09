@@ -4,14 +4,16 @@ pragma solidity ^0.8.19;
 import "./SimStable.sol";
 import "./SimGov.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./IUniswapV2Pair.sol";
 
-
-contract CentralVault {
+contract CentralVault is Ownable, ReentrancyGuard {
     SimStable public simStable;
     SimGov public simGov;
     IERC20 public collateralToken;
-    address public admin;
+    address public simStablePair; // UniV2 Pair for SimStable/Collateral
+    address public simGovPair;    // UniV2 Pair for SimGov/Collateral
 
     uint256 public collateralRatio; // Current CR (scaled by 1e4, e.g., 15000 = 150%)
     uint256 public targetCR = 15000; // Target CR (150%)
@@ -19,10 +21,6 @@ contract CentralVault {
     uint256 public buybackRatio = 5000; // 50% for buyback
     uint256 public minCollateralRatio = 11000; // Minimum CR (110%)
     uint256 public maxCollateralRatio = 20000; // Maximum CR (200%)
-    address public simStablePair; // UniV2 Pair for SimStable/Collateral
-    address public simGovPair;    // UniV2 Pair for SimGov/Collateral
-    int256 public minCR = 1e18; // Minimum CR (100%)
-    uint256 public maxCR = 2e18; // Maximum CR (200%)
     uint256 public pricePeg = 1e18; // Target price (1 USD scaled to 1e18)
 
     event CollateralRatioUpdated(uint256 newCR);
@@ -33,36 +31,29 @@ contract CentralVault {
     event CollateralRatioAdjusted(uint256 newCR);
     event PricesUpdated(uint256 simStablePrice, uint256 simGovPrice);
 
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Only admin can call this function");
-        _;
-    }
-
     constructor(
         address _simStable,
         address _simGov,
         address _collateralToken,
         address _simStablePair,
         address _simGovPair
-    ) {
+    ) Ownable(msg.sender) {
         simStable = SimStable(_simStable);
         simGov = SimGov(_simGov);
         collateralToken = IERC20(_collateralToken);
-        admin = msg.sender;
-        collateralRatio = targetCR; // Initialize CR to targetCR
         simStablePair = _simStablePair;
         simGovPair = _simGovPair;
+        collateralRatio = targetCR; // Initialize CR to targetCR
     }
 
     // Fetch the price of a token from a UniV2 pair
-    function getTokenPrice(address pair, address token)
-    public
-    view
-    returns (uint256 price)
-    {
+    function getTokenPrice(address pair, address token) public view returns (uint256 price) {
         (uint112 reserve0, uint112 reserve1, ) = IUniswapV2Pair(pair).getReserves();
         address token0 = IUniswapV2Pair(pair).token0();
         address token1 = IUniswapV2Pair(pair).token1();
+
+        // Ensure reserves are greater than zero
+        require(reserve0 > 0 && reserve1 > 0, "Reserves cannot be zero");
 
         if (token == token0) {
             return (uint256(reserve1) * 1e18) / uint256(reserve0);
@@ -81,16 +72,21 @@ contract CentralVault {
         emit PricesUpdated(simStablePrice, simGovPrice);
     }
 
-    function setTargetCR(uint256 _targetCR) external onlyAdmin {
+    function setTargetCR(uint256 _targetCR) external onlyOwner {
         targetCR = _targetCR;
         emit CollateralRatioUpdated(targetCR);
     }
 
-    function setBuybackRatio(uint256 _buybackRatio) external onlyAdmin {
+    function setBuybackRatio(uint256 _buybackRatio) external onlyOwner {
         buybackRatio = _buybackRatio;
     }
 
-    function mintStable(uint256 collateralAmount, uint256 govAmount) external {
+    function mintSimGov(address to, uint256 amount) external onlyOwner {
+        simGov.mint(to, amount);
+    }
+
+    function mintStable(uint256 collateralAmount, uint256 govAmount) external nonReentrant {
+
         require(collateralAmount > 0, "Collateral must be greater than zero");
         require(govAmount > 0, "SimGov amount must be greater than zero");
 
@@ -117,13 +113,16 @@ contract CentralVault {
         emit Minted(msg.sender, collateralAmount, govAmount, stableToMint);
     }
 
-    function redeemStable(uint256 stableAmount) external {
+    function redeemStable(uint256 stableAmount) external nonReentrant {
         require(stableAmount > 0, "Invalid stable amount");
 
         // Update prices before calculations
-        uint256 simStablePrice = getTokenPrice(address(simStablePair), address(simStable));
-        uint256 simGovPrice = getTokenPrice(address(simGovPair), address(simGov));
+        uint256 simStablePrice = getTokenPrice(simStablePair, address(simStable));
+        uint256 simGovPrice = getTokenPrice(simGovPair, address(simGov));
 
+        // Ensure prices are greater than zero
+        require(simStablePrice > 0, "SimStable price is zero");
+        require(simGovPrice > 0, "SimGov price is zero");
 
         // Calculate the total value of SimStable being redeemed (based on price)
         uint256 stableValueInCollateral = (stableAmount * simStablePrice) / 1e18;
@@ -132,10 +131,15 @@ contract CentralVault {
         uint256 totalCollateral = collateralToken.balanceOf(address(this));
         uint256 totalStableSupply = simStable.totalSupply();
 
-        uint256 collateralOut = (stableValueInCollateral * totalCollateral) / (totalStableSupply * simStablePrice);
-        uint256 govMinted = (stableValueInCollateral * 1e18) / simGovPrice;
+        // Ensure totalStableSupply is greater than zero
+        require(totalStableSupply > 0, "No SimStable tokens in circulation");
 
-        require(collateralOut > 0 && collateralOut <= totalCollateral, "Invalid collateral amount");
+        // Calculate collateralOut with proper scaling
+        uint256 collateralOut = (stableValueInCollateral * totalCollateral * 1e18) / (totalStableSupply * simStablePrice);
+        require(collateralOut > 0, "Invalid collateral amount");
+
+        // Calculate govMinted
+        uint256 govMinted = (stableValueInCollateral * 1e18) / simGovPrice;
 
         // Burn SimStable tokens and transfer collateral
         simStable.burn(msg.sender, stableAmount);
@@ -147,7 +151,7 @@ contract CentralVault {
         emit Redeemed(msg.sender, stableAmount, collateralOut, govMinted);
     }
 
-    function buybackSimGov(uint256 govAmount) external {
+    function buybackSimGov(uint256 govAmount) external nonReentrant {
         require(collateralRatio > targetCR, "Buyback not allowed: CR below target");
         require(govAmount > 0, "Invalid SimGov amount");
 
@@ -177,10 +181,10 @@ contract CentralVault {
         int256 newCR = int256(collateralRatio) + adjustment;
 
         // Ensure CR stays within bounds
-        if (newCR < int256(minCR)) {
-            newCR = int256(minCR);
-        } else if (newCR > int256(maxCR)) {
-            newCR = int256(maxCR);
+        if (newCR < int256(minCollateralRatio)) {
+            newCR = int256(minCollateralRatio);
+        } else if (newCR > int256(maxCollateralRatio)) {
+            newCR = int256(maxCollateralRatio);
         }
 
         // Update CR and emit event
@@ -188,7 +192,7 @@ contract CentralVault {
         emit CollateralRatioAdjusted(collateralRatio);
     }
 
-    function reCollateralize(uint256 collateralAmount) external {
+    function reCollateralize(uint256 collateralAmount) external nonReentrant {
         require(collateralRatio < targetCR, "Re-collateralization not required");
         require(collateralAmount > 0, "Invalid collateral amount");
 

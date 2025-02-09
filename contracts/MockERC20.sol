@@ -4,13 +4,12 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract MockERC20 is ERC20 {
-    constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
-
-    function mint(address to, uint256 amount) external {
-        _mint(to, amount);
+    constructor(string memory name, string memory symbol, uint256 initialSupply) ERC20(name, symbol) {
+        _mint(msg.sender, initialSupply);
     }
 
-    function burn(address from, uint256 amount) external {
-        _burn(from, amount);
+    // Add a mint function for testing
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
     }
 }
