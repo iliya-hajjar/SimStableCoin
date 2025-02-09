@@ -157,6 +157,7 @@ contract CentralVault is Ownable, ReentrancyGuard {
 
         // Update prices before calculations
         uint256 simGovPrice = getTokenPrice(simGovPair, address(simGov));
+        require(simGovPrice > 0, "SimGov price is zero");
 
         // Calculate maximum allowable buyback
         uint256 totalCollateral = collateralToken.balanceOf(address(this));
@@ -170,6 +171,10 @@ contract CentralVault is Ownable, ReentrancyGuard {
         require(collateralToken.transfer(msg.sender, collateralToReturn), "Collateral transfer failed");
 
         emit BuybackExecuted(msg.sender, govAmount, collateralToReturn);
+    }
+
+    function setCollateralRatio(uint256 newCR) external onlyOwner {
+        collateralRatio = newCR;
     }
 
     function adjustCollateralRatio() public {

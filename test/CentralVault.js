@@ -180,5 +180,79 @@ describe("CentralVault", function () {
         });
     });
 
-    // Add more tests for redeeming, buyback, re-collateralization, and collateral ratio adjustments
+    describe("Buyback", function () {
+        it("Should allow users to execute buyback of SimGov tokens", async function () {
+            const { centralVault, simGov, collateralToken, owner, user } = await loadFixture(deployCentralVaultFixture);
+
+            // Set collateral ratio above target (e.g., 160%)
+            await centralVault.connect(owner).setCollateralRatio(16000); // 160% (scaled by 1e4)
+
+            // Mint collateral to the CentralVault
+            const collateralAmount = 1000;
+            await collateralToken.connect(owner).mint(centralVault.target, collateralAmount);
+
+            // Mint SimGov tokens to the user
+            const govAmount = 100;
+            await centralVault.connect(owner).mintSimGov(user.address, govAmount);
+
+            // Approve CentralVault to burn SimGov tokens
+            await simGov.connect(user).approve(centralVault.target, govAmount);
+
+            // Execute buyback
+            const expectedCollateral = 100
+            await expect(centralVault.connect(user).buybackSimGov(govAmount))
+                .to.emit(centralVault, "BuybackExecuted")
+                .withArgs(user.address, govAmount, expectedCollateral);
+
+            // Check balances
+            expect(await simGov.balanceOf(user.address)).to.equal(0);
+            expect(await collateralToken.balanceOf(user.address)).to.equal(expectedCollateral);
+        });
+
+        it("Should revert if collateral ratio is below target", async function () {
+            const { centralVault, user } = await loadFixture(deployCentralVaultFixture);
+
+            // Collateral ratio is initialized to target (150%), so buyback should fail
+            await expect(centralVault.connect(user).buybackSimGov(100))
+                .to.be.revertedWith("Buyback not allowed: CR below target");
+        });
+
+        it("Should revert if SimGov amount is zero", async function () {
+            const { centralVault, user, owner } = await loadFixture(deployCentralVaultFixture);
+            await centralVault.connect(owner).setCollateralRatio(16000);
+            await expect(centralVault.connect(user).buybackSimGov(0))
+                .to.be.revertedWith("Invalid SimGov amount");
+        });
+
+        it("Should revert if insufficient collateral", async function () {
+            const { centralVault, simGov, collateralToken, owner, user } = await loadFixture(deployCentralVaultFixture);
+
+            // Set collateral ratio above target
+            await centralVault.connect(owner).setCollateralRatio(16000);
+
+            // Mint SimGov tokens to the user
+            const govAmount = 100;
+            await centralVault.connect(owner).mintSimGov(user.address, govAmount);
+
+            // Approve CentralVault to burn SimGov tokens
+            await simGov.connect(user).approve(centralVault.target, govAmount);
+
+            // Attempt buyback (CentralVault has no collateral)
+            await expect(centralVault.connect(user).buybackSimGov(govAmount))
+                .to.be.revertedWith("Invalid buyback amount");
+        });
+
+        it("Should revert if user has insufficient SimGov balance", async function () {
+            const { centralVault, user, owner } = await loadFixture(deployCentralVaultFixture);
+
+            // Set collateral ratio above target
+            await centralVault.connect(owner).setCollateralRatio(16000);
+
+            // Attempt buyback without SimGov tokens
+            await expect(centralVault.connect(user).buybackSimGov(100))
+                .to.be.revertedWith("Invalid buyback amount");
+        });
+    });
+
+    // Add more tests for buyback, re-collateralization, and collateral ratio adjustments
 });
