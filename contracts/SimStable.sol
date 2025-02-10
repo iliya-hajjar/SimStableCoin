@@ -3,9 +3,23 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./CentralVault.sol";
 
 contract SimStable is ERC20, Ownable {
     address public vault;
+
+    function _update(
+        address from,
+        address to,
+        uint256 value
+    ) internal override {
+        super._update(from, to, value); // Call parent implementation first
+
+        // Only trigger if vault is set and this isn't a mint/burn operation
+        if (vault != address(0) && from != address(0) && to != address(0)) {
+            CentralVault(vault).onSimStableTransfer();
+        }
+    }
 
     // Events
     event VaultSet(address indexed vault);

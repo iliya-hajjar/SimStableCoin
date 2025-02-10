@@ -381,5 +381,144 @@ describe("CentralVault", function () {
                 .to.be.revertedWith("Re-collateralization not required");
         });
     });
-    // Add more tests for collateral ratio adjustments
+    describe("Collateral Ratio Adjustments", function () {
+        it("Should increase CR when SimStable price is below peg", async function () {
+            const { centralVault, simStablePair, owner } = await loadFixture(deployCentralVaultFixture);
+
+            // Set SimStable price to 0.8 USD (below 1 USD peg)
+            await simStablePair.setReserves(
+                ethers.parseUnits("1000000", 18), // SimStable reserves
+                ethers.parseUnits("800000", 18),  // Collateral reserves (0.8 ratio)
+                Math.floor(Date.now() / 1000)
+            );
+
+            const initialCR = await centralVault.collateralRatio();
+            await centralVault.connect(owner).adjustCollateralRatio();
+            const newCR = await centralVault.collateralRatio();
+
+            // Deviation = 1e18 - 0.8e18 = 0.2e18
+            // Adjustment = (adjustmentCoefficient * deviation) / 1e18 = (100 * 0.2e18)/1e18 = 20
+            expect(newCR).to.equal(initialCR + 20n); // CR increases
+        });
+
+        it("Should decrease CR when SimStable price is above peg", async function () {
+            const { centralVault, simStablePair, owner } = await loadFixture(deployCentralVaultFixture);
+
+            // Set SimStable price to 1.2 USD (above peg)
+            await simStablePair.setReserves(
+                ethers.parseUnits("1000000", 18), // SimStable
+                ethers.parseUnits("1200000", 18), // Collateral (1.2 ratio)
+                Math.floor(Date.now() / 1000)
+            );
+
+            const initialCR = await centralVault.collateralRatio();
+            await centralVault.connect(owner).adjustCollateralRatio();
+            const newCR = await centralVault.collateralRatio();
+
+            // Deviation = 1e18 - 1.2e18 = -0.2e18
+            // Adjustment = (100 * -0.2e18)/1e18 = -20
+            expect(newCR).to.equal(initialCR - 20n); // CR decreases
+        });
+
+        it("Should not go below minCollateralRatio", async function () {
+            const { centralVault, simStablePair, owner } = await loadFixture(deployCentralVaultFixture);
+
+            // Set price to 1.5 USD (ABOVE PEG to trigger CR decrease)
+            await simStablePair.setReserves(
+                ethers.parseUnits("1", 18), // SimStable reserves
+                ethers.parseUnits("1.5", 18), // Collateral reserves (price = 1.5 USD)
+                Math.floor(Date.now() / 1000)
+            );
+
+            // Set CR to minimum + 1 (11001) to test boundary
+            await centralVault.connect(owner).setCollateralRatio(11001);
+
+            // Trigger adjustment (should try to decrease CR)
+            await centralVault.connect(owner).adjustCollateralRatio();
+            const newCR = await centralVault.collateralRatio();
+
+            // Verify it clamps to minCollateralRatio (11000)
+            expect(newCR).to.equal(11000);
+        });
+
+        it("Should not exceed maxCollateralRatio", async function () {
+            const { centralVault, simStablePair, owner } = await loadFixture(deployCentralVaultFixture);
+
+            // Set price to 0.5 USD (BELOW PEG to trigger CR increase)
+            await simStablePair.setReserves(
+                ethers.parseUnits("1", 18), // SimStable reserves
+                ethers.parseUnits("0.5", 18), // Collateral reserves (price = 0.5 USD)
+                Math.floor(Date.now() / 1000)
+            );
+
+            // Set CR to max - 1 (19999) to test boundary
+            await centralVault.connect(owner).setCollateralRatio(19999);
+
+            // Trigger adjustment (should try to increase CR)
+            await centralVault.connect(owner).adjustCollateralRatio();
+            const newCR = await centralVault.collateralRatio();
+
+            // Verify it clamps to maxCollateralRatio (20000)
+            expect(newCR).to.equal(20000);
+        });
+
+        it("Should not change CR when price is exactly at peg", async function () {
+            const { centralVault, simStablePair, owner } = await loadFixture(deployCentralVaultFixture);
+
+            // Set price exactly at 1 USD
+            await simStablePair.setReserves(
+                ethers.parseUnits("1000", 18),
+                ethers.parseUnits("1000", 18),
+                Math.floor(Date.now() / 1000)
+            );
+
+            const initialCR = await centralVault.collateralRatio();
+            await centralVault.connect(owner).adjustCollateralRatio();
+            const newCR = await centralVault.collateralRatio();
+
+            expect(newCR).to.equal(initialCR); // No adjustment
+        });
+
+        it("Should revert if non-owner tries to set CR manually", async function () {
+            const { centralVault, user } = await loadFixture(deployCentralVaultFixture);
+            await expect(centralVault.connect(user).setCollateralRatio(15000))
+                .to.be.revertedWithCustomError(centralVault, "OwnableUnauthorizedAccount");
+        });
+
+        it("Should auto-adjust CR on SimStable transfers", async function () {
+            const { centralVault, simStable, simGov, collateralToken, owner, user, simStablePair, simGovPair } = await loadFixture(deployCentralVaultFixture);
+
+            // 1. Set up prices (SimStable = 0.8, SimGov = 2.0)
+            await simStablePair.setReserves(
+                ethers.parseUnits("1000", 18), // SimStable
+                ethers.parseUnits("800", 18),  // Collateral (0.8 ratio)
+                Math.floor(Date.now() / 1000)
+            );
+            await simGovPair.setReserves(
+                ethers.parseUnits("1", 18),    // SimGov
+                ethers.parseUnits("2", 18),    // Collateral (2.0 ratio)
+                Math.floor(Date.now() / 1000)
+            );
+
+            // 2. Mint SimStable through vault
+            const collateralAmount = ethers.parseUnits("1000", 18);
+            const govAmount = ethers.parseUnits("500", 18);
+            await collateralToken.connect(owner).mint(user.address, collateralAmount);
+            await centralVault.connect(owner).mintSimGov(user.address, govAmount);
+            await collateralToken.connect(user).approve(centralVault.target, collateralAmount);
+            await simGov.connect(user).approve(centralVault.target, govAmount);
+            await centralVault.connect(user).mintStable(collateralAmount, govAmount);
+
+            // 3. Verify initial state
+            const initialCR = await centralVault.collateralRatio();
+            expect(initialCR).to.equal(15000); // Ensure initial CR is correct
+
+            // 4. Transfer tokens to trigger adjustment
+            await simStable.connect(user).transfer(owner.address, 100);
+
+            // 5. Verify CR adjustment
+            const newCR = await centralVault.collateralRatio();
+            expect(newCR).to.equal(15020); // 15000 + (100 * 0.2e18 / 1e18) = 15020
+        });
+    });
 });
