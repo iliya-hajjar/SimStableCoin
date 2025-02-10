@@ -1,0 +1,36 @@
+.idea
+node_modules/
+
+# Hardhat files
+cache/
+artifacts/
+typechain/
+coverage/
+dist/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Compiled contracts
+*.tsbuildinfo
+
+# VS Code settings
+.vscode/
+
+# MacOS system files
+.DS_Store
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Hardhat network temporary files
+hardhat-network-*
+
+# Dependencies lock files (if applicable, include the one you use)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
