@@ -58,7 +58,7 @@ A decentralized finance protocol featuring a collateral-backed stablecoin with a
 
 ### Installation
 ```bash
-git clone https://github.com/<your-repo>.git
+git git@github.com:iliya-hajjar/SimStableCoin.git
 cd defi-stablecoin-system
 npm install
 ````
