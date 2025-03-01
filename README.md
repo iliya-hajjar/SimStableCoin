@@ -86,10 +86,17 @@ graph TD
     D -->|Price Feed| G[Uniswap Pair]
 ```
 
+### Proxy Architecture
+```mermaid
+graph TD
+    A[Proxy Contract] -->|delegatecall| B[CentralVault Implementation]
+    B -->|Storage| A
+    A --> C[Persistent State]
+```
+
 ## Future Improvements
 
 ### Protocol Enhancements
-- **Upgradeability**: Implement proxy pattern for contract updates
 - **DAO Governance**: Add voting for parameter adjustments
 - **Advanced Oracles**: Chainlink integration for price feeds
 - **Cross-Chain**: Bridge support for multi-chain operations

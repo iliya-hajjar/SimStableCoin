@@ -3,25 +3,27 @@ pragma solidity ^0.8.19;
 
 import "./SimStable.sol";
 import "./SimGov.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./IUniswapV2Pair.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
-contract CentralVault is Ownable, ReentrancyGuard {
+
+contract CentralVault is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
     SimStable public simStable;
     SimGov public simGov;
     IERC20 public collateralToken;
-    address public simStablePair; // UniV2 Pair for SimStable/Collateral
-    address public simGovPair;    // UniV2 Pair for SimGov/Collateral
+    address public simStablePair;
+    address public simGovPair;
 
-    uint256 public collateralRatio; // Current CR (scaled by 1e4, e.g., 15000 = 150%)
-    uint256 public targetCR = 15000; // Target CR (150%)
-    uint256 public adjustmentCoefficient = 100; // Adjustment rate (scaled by 1e4)
-    uint256 public buybackRatio = 5000; // 50% for buyback
-    uint256 public minCollateralRatio = 11000; // Minimum CR (110%)
-    uint256 public maxCollateralRatio = 20000; // Maximum CR (200%)
-    uint256 public pricePeg = 1e18; // Target price (1 USD scaled to 1e18)
+    uint256 public collateralRatio;
+    uint256 public targetCR;
+    uint256 public adjustmentCoefficient;
+    uint256 public buybackRatio;
+    uint256 public minCollateralRatio;
+    uint256 public maxCollateralRatio;
+    uint256 public pricePeg;
 
     event CollateralRatioUpdated(uint256 newCR);
     event Minted(address indexed user, uint256 collateralAmount, uint256 govBurned, uint256 stableMinted);
@@ -31,19 +33,29 @@ contract CentralVault is Ownable, ReentrancyGuard {
     event CollateralRatioAdjusted(uint256 newCR);
     event PricesUpdated(uint256 simStablePrice, uint256 simGovPrice);
 
-    constructor(
+    function initialize(
+        address initialOwner,
         address _simStable,
         address _simGov,
         address _collateralToken,
         address _simStablePair,
         address _simGovPair
-    ) Ownable(msg.sender) {
+    ) public initializer {
+        __Ownable_init(initialOwner);
+        __ReentrancyGuard_init();
+
         simStable = SimStable(_simStable);
         simGov = SimGov(_simGov);
         collateralToken = IERC20(_collateralToken);
         simStablePair = _simStablePair;
         simGovPair = _simGovPair;
-        collateralRatio = targetCR; // Initialize CR to targetCR
+        collateralRatio = 15000;
+        targetCR = 15000;
+        adjustmentCoefficient = 100;
+        buybackRatio = 5000;
+        minCollateralRatio = 11000;
+        maxCollateralRatio = 20000;
+        pricePeg = 1e18;
     }
 
     // Fetch the price of a token from a UniV2 pair

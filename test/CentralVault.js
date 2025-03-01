@@ -1,6 +1,6 @@
 const { expect } = require("chai");
-const { ethers } = require("hardhat");
 const { loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
+const { ethers , upgrades} = require("hardhat");
 
 
 describe("CentralVault", function () {
@@ -25,21 +25,30 @@ describe("CentralVault", function () {
         const simStablePair = await MockUniswapV2Pair.deploy(simStable.target, collateralToken.target);
         const simGovPair = await MockUniswapV2Pair.deploy(simGov.target, collateralToken.target);
 
-        // Deploy CentralVault
+        // Deploy CentralVault through proxy
         const CentralVault = await ethers.getContractFactory("CentralVault");
-        const centralVault = await CentralVault.deploy(
-            simStable.target,
-            simGov.target,
-            collateralToken.target,
-            simStablePair.target,
-            simGovPair.target
+        const centralVaultProxy = await upgrades.deployProxy(
+            CentralVault,
+            [
+                owner.address,       // initialOwner
+                simStable.target,    // _simStable
+                simGov.target,       // _simGov
+                collateralToken.target,  // _collateralToken
+                simStablePair.target,    // _simStablePair
+                simGovPair.target        // _simGovPair
+            ],
+            { initializer: "initialize" }
         );
 
-        // Set vault addresses in SimGov and SimStable
-        await simGov.connect(owner).setVault(centralVault.target);
-        await simStable.connect(owner).setVault(centralVault.target);
+        // Wait for deployment
+        await centralVaultProxy.waitForDeployment();
+        const centralVaultAddress = await centralVaultProxy.getAddress();
 
-        return { centralVault, simGov, simStable, collateralToken, simStablePair, simGovPair, owner, user };
+        // Set vault addresses in SimGov and SimStable
+        await simGov.connect(owner).setVault(centralVaultAddress);
+        await simStable.connect(owner).setVault(centralVaultAddress);
+
+        return { centralVault: centralVaultProxy, simGov, simStable, collateralToken, simStablePair, simGovPair, owner, user };
     }
 
     describe("Deployment", function () {
@@ -354,7 +363,7 @@ describe("CentralVault", function () {
             // Mint additional collateral to the user (this amount is more than the shortfall)
             await collateralToken.connect(owner).mint(user.address, collateralToAdd);
 
-            // Approve CentralVault to spend the additional collateral from the user using centralVault.address
+            // Approve CentralVault to spend the additional collateral from the user using centralVault.target
             await collateralToken.connect(user).approve(centralVault.target, collateralToAdd);
 
             // Attempt re-collateralization with excess collateral.
